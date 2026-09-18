@@ -1,0 +1,76 @@
+name: Scan Proxy IPs
+
+on:
+  schedule:
+    # UTC 4:00  = 北京时间 12:00
+    # UTC 16:00 = 北京时间 00:00
+    - cron: '0 4,16 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "proxy-scan"
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install requests
+
+      - name: Run scanner
+        continue-on-error: true
+        run: python scanner.py
+
+      - name: Ensure output exists
+        if: always()
+        run: |
+          mkdir -p output public
+          if [ ! -f output/regions.json ]; then
+            echo '{"US":[],"JP":[],"SG":[],"TW":[]}' > output/regions.json
+          fi
+
+      - name: Generate site
+        continue-on-error: true
+        run: python generate_site.py
+
+      - name: Ensure index.html exists
+        if: always()
+        run: |
+          if [ ! -f public/index.html ]; then
+            echo "<h1>暂无数据</h1>" > public/index.html
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-ips-${{ github.run_number }}
+          path: |
+            output/
+            public/
+          retention-days: 7
+
+      - name: Deploy to GitHub Pages
+        if: always()
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./public
+          publish_branch: gh-pages
+          force_orphan: true
